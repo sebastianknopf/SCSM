@@ -12,8 +12,8 @@ parser = OptionParser()
 parser.add_option("-d", "--data", dest="data_filename", help="report data input file location")
 parser.add_option("-s", "--schedule", dest="schedule_filename", help="schedule data input file name")
 parser.add_option("-o", "--output", dest="output_filename", help="output XSLX file name")
+parser.add_option("-r", "--routes", dest="routes", help="[optional] routes to use in the model separated by a comma")
 parser.add_option("-v", "--verbose", action="store_true", dest="verbose", help="[optional] display verbose result")
-parser.add_option("-r", "--routes", dest="routes", help="[optional] routes to use within the model separated by a comma")
 
 (options, args) = parser.parse_args()
 
