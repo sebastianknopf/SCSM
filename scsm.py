@@ -14,12 +14,15 @@ class StatModel:
 
     _df_data = None
     _df_schedules = None
+    _ignore_data_quality = False
 
     _routes = []
-    _route_num_trips = dict()
     _route_complaint_rate = dict()
     _route_control_performance = dict()
-    _route_scheduled_hours = dict()
+    _route_trips_per_hour = dict()
+
+    _data_quality_map = dict()
+    _scheduled_hours_map = dict()
 
     _disposition_result = dict()
 
@@ -47,6 +50,8 @@ class StatModel:
                 # try loading routes from data
                 self._routes = df['route_name'].unique()
                 self._routes.sort()
+
+                self._routes = list(self._routes)
 
                 # add data to existing data frame depending on append parameter
                 if append and self._df_data is not None:
@@ -86,7 +91,7 @@ class StatModel:
 
     def set_routes(self, routes):
         if isinstance(routes, list):
-            self._routes = [r.strip() for r in routes]
+            self._routes = [str(r).strip() for r in routes]
             self._routes.sort()
         else:
             raise DataProcessingError("parameter routes must be a list")
@@ -94,10 +99,12 @@ class StatModel:
     def process_schedule(self, shuffle_same_priorities=True):
 
         # reset disposition result to empty list
-        self._route_num_trips = dict()
         self._route_complaint_rate = dict()
         self._route_control_performance = dict()
-        self._route_scheduled_hours = dict()
+        self._route_trips_per_hour = dict()
+
+        self._data_quality_map = dict()
+        self._scheduled_hours_map = dict()
 
         self._disposition_result = dict()
 
@@ -119,9 +126,9 @@ class StatModel:
                 minutes = (end_time - start_time).total_seconds() / 60
                 num_hours = num_hours + minutes / 60
 
-            self._route_num_trips[str(route)] = num_trips
             self._route_complaint_rate[str(route)] = (num_complaints / num_passengers)
             self._route_control_performance[str(route)] = (num_passengers / num_hours)
+            self._route_trips_per_hour[str(route)] = (num_trips / num_hours)
 
         # calculate prioritized route for each hour in schedule entries
         for i, si in self._df_schedules.iterrows():
@@ -146,10 +153,10 @@ class StatModel:
                     selected_route = max(priorities, key=priorities.get)
 
                     # mark one hour as scheduled on the selected route
-                    if (hour, selected_route) not in self._route_scheduled_hours.keys():
-                        self._route_scheduled_hours[(hour, selected_route)] = 1
+                    if (hour, selected_route) not in self._scheduled_hours_map.keys():
+                        self._scheduled_hours_map[(hour, selected_route)] = 1
                     else:
-                        self._route_scheduled_hours[(hour, selected_route)] += 1
+                        self._scheduled_hours_map[(hour, selected_route)] += 1
 
                     # each hour should only be set once a day
                     if (si['date'], hour) not in self._disposition_result.keys():
@@ -233,15 +240,24 @@ class StatModel:
 
     def _route_priority(self, hour, route):
         # calculate data quality for the route in the corresponding hour
-        dq = self._data_quality(hour, route)
+        dq = self._data_quality(hour, route) if not self._ignore_data_quality else 2
+        self._data_quality_map[(hour, route)] = dq
 
         if dq > 2:
             return 1
         else:
-            cr_factor = self._route_complaint_rate[route] / max(self._route_complaint_rate.values())
-            nj_factor = 1 - (self._route_num_trips[route] / len(self._df_data.index))
+            # be aware of already planned hours on a route
+            np_approx = None
+            if (hour, route) in self._scheduled_hours_map:
+                np_approx = self._scheduled_hours_map[(hour, route)] * self._route_trips_per_hour[route] * 0.5
 
-            return cr_factor * (nj_factor / 2)
+            j_hr = len(self._df_data[(self._df_data['hour'] == hour) & (self._df_data['route_name'] == route)].index)
+            j_h = len(self._df_data[self._df_data['hour'] == hour].index)
+
+            qc_factor = self._route_complaint_rate[route] / max(self._route_complaint_rate.values())
+            nj_factor = 1 - ((j_hr + (np_approx if np_approx is not None else 0)) / j_h)
+
+            return qc_factor * (nj_factor / 2)
 
     def _data_quality(self, hour, route):
         selection = self._df_data[(self._df_data['hour'] == hour) & (self._df_data['route_name'] == route)]
@@ -249,18 +265,18 @@ class StatModel:
         k = selection['num_complaints'].sum()
 
         # be aware of already planned hours on a route
-        np = None
-        if (hour, route) in self._route_scheduled_hours:
-            np = self._route_scheduled_hours[(hour, route)] * self._route_control_performance[route]
+        np_approx = None
+        if (hour, route) in self._scheduled_hours_map:
+            np_approx = self._scheduled_hours_map[(hour, route)] * self._route_control_performance[route] * 0.5
 
         qs = [0.03, 0.06]
 
-        if n > 500:
+        if n + (np_approx if np_approx is not None else 0) > 500:
             return 1
-        elif n < 50:
+        elif n + (np_approx if np_approx is not None else 0) < 50:
             return 3
         else:
-            cl, cu = self._confidence_interval(n + (np if np is not None else 0), (k / n))
+            cl, cu = self._confidence_interval(n + (np_approx if np_approx is not None else 0), (k / n))
             deviation = self._interval_deviation(cl, cu)
 
             for level in range(0, len(qs)):
