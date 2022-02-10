@@ -8,13 +8,13 @@ SCSM uses data about certain public transport routes, the amount of passengers c
 
 A sample implementation using SCSM can be found in the file ```run.py```. The file is also able to run a simple demo using example data provided in ```./inputs``` directory. To run SCSM using this repo, you need at least
 
-* a file with report data from previous duties
+* a SQLite database containing report data from previous duties
 * a file describing planned crew schedules with at least one planned duty in future
 
 To run he SCSM script, you only need to call
 
 ```
-python run.py -d ./input/example_report_data.txt -s ./input/example_schedule_data.txt -o ./output/example_schedule.xlsx
+python run.py -d ./input/example_report_data.db3 -s ./input/example_schedule_data.txt -o ./output/example_schedule.xlsx
 ```
 in the execution shell. Call ```python run.py -h``` for help and see the next paragraph for format specifications of the input files.
 
@@ -31,7 +31,7 @@ with the routes which should be included separated by a comma. Routes not includ
 
 ## Input Data Formats
 
-The report data input file must contain at least the columns
+The report SQLite database must contain a table named ```report``` with at least the columns
 
 * date: date in format yyyyMMdd
 * route_name: an unique route name
