@@ -1,6 +1,7 @@
 # model script for SCSM classes and functions
 import math
 import random
+import sqlite3
 
 from datetime import datetime
 from datetime import timedelta
@@ -12,8 +13,8 @@ from xlsxwriter import exceptions
 
 class StatModel:
 
-    _df_data = None
     _df_schedules = None
+    _sqlite3_database = None
     _ignore_data_quality = False
 
     _routes = []
@@ -32,39 +33,36 @@ class StatModel:
 
         random.seed()
 
-    def load_data(self, data_filename, append=False):
-        if data_filename is not None:
+    def load_data(self, database_filename):
+        if database_filename is not None:
             try:
                 # read data file and check whether it contains data
-                df = read_csv(data_filename, sep=";")
+                self._sqlite3_database = sqlite3.connect(database_filename)
 
-                if df.shape[0] < 1:
-                    raise FileEmptyError(data_filename)
+                cursor = self._sqlite3_database.cursor()
+                cursor.execute("SELECT COUNT(*) FROM report")
 
-                # convert column route_name to string
-                df['route_name'] = df['route_name'].astype(str)
-
-                # append corresponding trip hour to data
-                df['hour'] = [int(dt[0:2]) for dt in df['departure_time']]
+                result = cursor.fetchone()
+                if result[0] == 0:
+                    raise DatabaseEmptyError(database_filename)
 
                 # try loading routes from data
-                self._routes = df['route_name'].unique()
-                self._routes.sort()
+                cursor.execute("SELECT DISTINCT route_name FROM report")
+                result = cursor.fetchall()
 
+                self._routes = []
+                for r in result:
+                    self._routes.append(r[0])
+
+                self._routes.sort()
                 self._routes = list(self._routes)
 
-                # add data to existing data frame depending on append parameter
-                if append and self._df_data is not None:
-                    self._df_data.append(df)
-                else:
-                    self._df_data = df
-
-            except errors.EmptyDataError:
+            except sqlite3.Error as e:
                 # when the entire file is empty and contains nothing at all
-                raise FileEmptyError(data_filename)
+                raise DatabaseEmptyError(database_filename)
 
             except FileNotFoundError:
-                raise FileReadError(data_filename)
+                raise FileReadError(database_filename)
 
     def load_schedule(self, schedule_filename, append=False):
         if schedule_filename is not None:
@@ -73,7 +71,7 @@ class StatModel:
                 df = read_csv(schedule_filename, sep=";")
 
                 if df.shape[0] < 1:
-                    raise FileEmptyError(schedule_filename)
+                    raise DatabaseEmptyError(schedule_filename)
 
                 # add schedules to existing data frame depending on append parameter
                 if append and self._df_schedules is not None:
@@ -83,7 +81,7 @@ class StatModel:
 
             except errors.EmptyDataError:
                 # when the entire file is empty and contains nothing at all
-                raise FileEmptyError(schedule_filename)
+                raise DatabaseEmptyError(schedule_filename)
 
             except FileNotFoundError:
                 # when the file does not exists or may not be readable
@@ -96,9 +94,12 @@ class StatModel:
         else:
             raise DataProcessingError("parameter routes must be a list")
 
+    def create_schedule(self):
+        pass
+
     def process_schedule(self, shuffle_same_priorities=True):
 
-        # reset disposition result to empty list
+        # reset data dicts disposition result to empty list
         self._route_complaint_rate = dict()
         self._route_control_performance = dict()
         self._route_trips_per_hour = dict()
@@ -110,17 +111,29 @@ class StatModel:
 
         # calculate general data for each route
         for route in self._routes:
-            selection = self._df_data[self._df_data['route_name'] == route]
-            num_trips = len(selection.index)
-            num_passengers = selection['num_passengers'].sum()
-            num_complaints = selection['num_complaints'].sum()
+            cursor = self._sqlite3_database.cursor()
+            cursor.execute("SELECT SUM(num_passengers), SUM(num_complaints) FROM report WHERE route_name=?",
+                           (route,))
+
+            result = cursor.fetchone()
+
+            num_passengers = result[0]
+            num_complaints = result[1]
+            num_trips = 0
             num_hours = 0
 
-            for i in selection.index:
-                start_hour, start_rest = selection['departure_time'][i].split(":", 1)
+            cursor.execute("SELECT DISTINCT (date || trip_id) AS 'id', departure_time, arrival_time "
+                           "FROM report WHERE route_name=?",
+                           (route,))
+
+            result = cursor.fetchall()
+            num_trips = len(result)
+
+            for tr in result:
+                start_hour, start_rest = tr[1].split(":", 1)
                 start_time = timedelta(hours=int(start_hour)) + datetime.strptime(start_rest, "%M:%S")
 
-                end_hour, end_rest = selection['arrival_time'][i].split(":", 1)
+                end_hour, end_rest = tr[2].split(":", 1)
                 end_time = timedelta(hours=int(end_hour)) + datetime.strptime(end_rest, "%M:%S")
 
                 minutes = (end_time - start_time).total_seconds() / 60
@@ -130,7 +143,7 @@ class StatModel:
             self._route_control_performance[str(route)] = (num_passengers / num_hours)
             self._route_trips_per_hour[str(route)] = (num_trips / num_hours)
 
-        # calculate prioritized route for each hour in schedule entries
+        # calculate prioritized route for each hour in schedule entries // TODO: read changed data format
         for i, si in self._df_schedules.iterrows():
             start_hour = int(si['start_hour'])
             end_hour = int(si['end_hour'])
@@ -166,12 +179,12 @@ class StatModel:
             else:
                 raise DataProcessingError("start hour and end hour must be in interval [0, 23]")
 
-    def print_disposition_result(self):
+    def print_disposition_result(self): # TODO: remove in order to display result as screen
         for date, hour in self._disposition_result:
             dtm = datetime.strptime(str(date), "%Y%m%d")
             print(f"{dtm.strftime('%d.%m.%Y')}, Hour {hour}: Route {self._disposition_result[(date, hour)]}")
 
-    def write_disposition_result(self, output_filename):
+    def write_disposition_result(self, output_filename): # TODO: remove in order to display result as screen
         try:
 
             with Workbook(output_filename) as workbook:
@@ -251,8 +264,23 @@ class StatModel:
             if (hour, route) in self._scheduled_hours_map:
                 np_approx = self._scheduled_hours_map[(hour, route)] * self._route_trips_per_hour[route] * 0.5
 
-            j_hr = len(self._df_data[(self._df_data['hour'] == hour) & (self._df_data['route_name'] == route)].index)
-            j_h = len(self._df_data[self._df_data['hour'] == hour].index)
+            # select number of trips per hour/route and per hour in general
+            cursor = self._sqlite3_database.cursor()
+            cursor.execute("SELECT DISTINCT (date || trip_id) AS 'id', COUNT(*) "
+                           "FROM report "
+                           "WHERE route_name=? AND SUBSTR(departure_time, 1, 2)=?",
+                           (route, "{:02d}".format(hour)))
+
+            result = cursor.fetchone()
+            j_hr = result[1]
+
+            cursor.execute("SELECT DISTINCT (date || trip_id) AS 'id', COUNT(*) "
+                           "FROM report "
+                           "WHERE SUBSTR(departure_time, 1, 2)=?",
+                           ("{:02d}".format(hour),))
+
+            result = cursor.fetchone()
+            j_h = result[1]
 
             qc_factor = self._route_complaint_rate[route] / max(self._route_complaint_rate.values())
             nj_factor = 1 - ((j_hr + (np_approx if np_approx is not None else 0)) / j_h)
@@ -260,9 +288,19 @@ class StatModel:
             return qc_factor * (nj_factor / 2)
 
     def _data_quality(self, hour, route):
-        selection = self._df_data[(self._df_data['hour'] == hour) & (self._df_data['route_name'] == route)]
-        n = selection['num_passengers'].sum()
-        k = selection['num_complaints'].sum()
+        cursor = self._sqlite3_database.cursor()
+        cursor.execute("SELECT SUM(num_passengers), SUM(num_complaints) "
+                       "FROM report "
+                       "WHERE route_name=? AND SUBSTR(departure_time, 1, 2)=?",
+                       (route, "{:02d}".format(hour)))
+
+        selection = cursor.fetchone()
+
+        n = selection[0]
+        k = selection[1]
+
+        if n is None or k is None:
+            return 3
 
         # be aware of already planned hours on a route
         np_approx = None
@@ -300,7 +338,7 @@ class _StatModelError(Exception):
     pass
 
 
-class FileEmptyError(_StatModelError):
+class DatabaseEmptyError(_StatModelError):
     """error indicating an empty file"""
 
     filename = None
@@ -325,6 +363,7 @@ class FileWriteError(_StatModelError):
 
     def __init__(self, filename=None):
         self.filename = filename
+
 
 class DataProcessingError(_StatModelError):
     """error indicating a issue during data processing"""

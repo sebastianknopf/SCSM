@@ -4,7 +4,7 @@ from optparse import OptionParser
 from scsm import StatModel
 from scsm import FileReadError
 from scsm import FileWriteError
-from scsm import FileEmptyError
+from scsm import DatabaseEmptyError
 from scsm import DataProcessingError
 
 # parse arguments and options to global variable
@@ -54,7 +54,7 @@ if __name__ == '__main__':
     except FileReadError as e:
         _error(f"input file {e.filename} may not be present or readable")
 
-    except FileEmptyError as e:
+    except DatabaseEmptyError as e:
         _error(f"input file {e.filename} does not contain any records")
 
     except FileWriteError as e:
