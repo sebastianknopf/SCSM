@@ -2,13 +2,12 @@
 import math
 import random
 import sqlite3
+import tkinter
 
 from datetime import datetime
 from datetime import timedelta
 from pandas import read_csv
 from pandas import errors
-from xlsxwriter import Workbook
-from xlsxwriter import exceptions
 
 
 class StatModel:
@@ -94,7 +93,10 @@ class StatModel:
         else:
             raise DataProcessingError("parameter routes must be a list")
 
-    def create_schedule(self):
+    def create_schedule(self, num_hours=38,
+                        date_from=0, date_until=0,
+                        earliest_hour=0, latest_hour=23,
+                        min_length=2, max_length=6):
         pass
 
     def process_schedule(self, shuffle_same_priorities=True):
@@ -179,77 +181,9 @@ class StatModel:
             else:
                 raise DataProcessingError("start hour and end hour must be in interval [0, 23]")
 
-    def print_disposition_result(self): # TODO: remove in order to display result as screen
-        for date, hour in self._disposition_result:
-            dtm = datetime.strptime(str(date), "%Y%m%d")
-            print(f"{dtm.strftime('%d.%m.%Y')}, Hour {hour}: Route {self._disposition_result[(date, hour)]}")
-
-    def write_disposition_result(self, output_filename): # TODO: remove in order to display result as screen
-        try:
-
-            with Workbook(output_filename) as workbook:
-
-                # default cell format
-                hf = workbook.add_format()
-                hf.set_bg_color("#23a740")
-                hf.set_color("#ffffff")
-                hf.set_align("center")
-
-                cf = workbook.add_format()
-                cf.set_align("center")
-
-                cfr = workbook.add_format()
-                cfr.set_bg_color("#b4d2ff")
-                cfr.set_align("center")
-
-                # prepare output file for displaying a schedule
-                worksheet = workbook.add_worksheet("Dienstplan")
-
-                # header row
-                worksheet.write(0, 0, "Stunde", hf)
-                for h in range(0, 24):
-                    worksheet.write(h + 1, 0, h, cf)
-
-                # write schedule data
-                last_date = None
-                last_index = 1
-
-                time_route_map = dict()
-
-                for date, hour in self._disposition_result.keys():
-                    if last_date is None:
-                        last_date = date
-
-                    if last_date == date:
-                        time_route_map[hour] = self._disposition_result[(date, hour)]
-                    else:
-                        dtm = datetime.strptime(str(last_date), '%Y%m%d')
-                        worksheet.write(0, last_index, dtm.strftime('%d.%m.%Y'), hf)
-
-                        for h in time_route_map.keys():
-                            worksheet.write(h + 1, last_index, time_route_map[h], cfr)
-
-                        last_index += 1
-                        last_date = date
-
-                        time_route_map = dict()
-                        time_route_map[hour] = self._disposition_result[(date, hour)]
-
-                # write last date
-                dtm = datetime.strptime(str(last_date), '%Y%m%d')
-                worksheet.write(0, last_index, dtm.strftime('%d.%m.%Y'), hf)
-
-                for h in time_route_map.keys():
-                    worksheet.write(h + 1, last_index, time_route_map[h], cfr)
-
-                # formatting stuff
-                worksheet.set_column(0, last_index, 10)
-
-                for r in range(0, 25):
-                    worksheet.set_row(r, 14)
-
-        except exceptions.FileCreateError:
-            raise FileWriteError(output_filename)
+    def show_disposition_result(self):
+        viewer = Viewer(Viewer.DRAW_DISPOSITION_RESULT, dict(data=self._disposition_result))
+        viewer.show()
 
     def _route_priority(self, hour, route):
         # calculate data quality for the route in the corresponding hour
@@ -333,6 +267,72 @@ class StatModel:
         return (upper - lower) / 2
 
 
+class Viewer:
+
+    DRAW_DISPOSITION_RESULT = 0
+
+    _window = None
+
+    _g_padding = 10
+    _g_background = "lightblue"
+
+    def __init__(self, view, result):
+        self._init_gui()
+
+        if view == Viewer.DRAW_DISPOSITION_RESULT:
+            self._draw_disposition_result(result)
+
+    def show(self):
+        self._window.mainloop()
+
+    def _init_gui(self):
+        self._window = tkinter.Tk()
+        self._window.resizable(False, False)
+
+    def _draw_disposition_result(self, result):
+        self._window.title("Disposition Result")
+
+        # draw first display line
+        tkinter.Label(self._window, text="Date").grid(
+            row=0,
+            column=0,
+            padx=self._g_padding,
+            pady=self._g_padding
+        )
+
+        for h in range(0, 24):
+            tkinter.Label(self._window, text="{0}".format(h), borderwidth=1).grid(
+                row=0,
+                column=h+1,
+                padx=self._g_padding,
+                pady=self._g_padding
+            )
+
+        # display data
+        dates = []
+        for date, hour in result["data"]:
+            dtm = datetime.strptime(str(date), "%Y%m%d")
+
+            ri = len(dates)
+            if dates.__contains__(date):
+                ri = dates.index(date)
+            else:
+                dates.append(date)
+
+            tkinter.Label(self._window, text=dtm.strftime('%d.%m.%Y')).grid(
+                row=ri + 1,
+                column=0,
+                padx=10,
+                pady=10
+            )
+
+            tkinter.Label(self._window, text=result["data"][(date, hour)], bg=self._g_background).grid(
+                row=ri + 1,
+                column=hour + 1,
+                sticky='ew'
+            )
+
+
 class _StatModelError(Exception):
     """base error class for SCSM errors"""
     pass
@@ -356,15 +356,7 @@ class FileReadError(_StatModelError):
         self.filename = filename
 
 
-class FileWriteError(_StatModelError):
-    """error indicating an file writing error"""
-
-    filename = None
-
-    def __init__(self, filename=None):
-        self.filename = filename
-
-
 class DataProcessingError(_StatModelError):
     """error indicating a issue during data processing"""
     pass
+

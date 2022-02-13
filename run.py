@@ -3,7 +3,6 @@ import sys
 from optparse import OptionParser
 from scsm import StatModel
 from scsm import FileReadError
-from scsm import FileWriteError
 from scsm import DatabaseEmptyError
 from scsm import DataProcessingError
 
@@ -11,9 +10,7 @@ from scsm import DataProcessingError
 parser = OptionParser()
 parser.add_option("-d", "--data", dest="data_filename", help="report data input file location")
 parser.add_option("-s", "--schedule", dest="schedule_filename", help="schedule data input file name")
-parser.add_option("-o", "--output", dest="output_filename", help="output XSLX file name")
 parser.add_option("-r", "--routes", dest="routes", help="[optional] routes to use in the model separated by a comma")
-parser.add_option("-v", "--verbose", action="store_true", dest="verbose", help="[optional] display verbose result")
 
 (options, args) = parser.parse_args()
 
@@ -34,9 +31,6 @@ if __name__ == '__main__':
     if options.schedule_filename is None:
         _error("option -s/--schedules missing, see -h/--help for more information")
 
-    if options.output_filename is None:
-        _error("option -o/--output missing, see -h/--help for more information")
-
     # run SCSM optimization on planned schedules regarding existing report data
     try:
         scsm = StatModel(options.data_filename, options.schedule_filename)
@@ -44,21 +38,16 @@ if __name__ == '__main__':
         if options.routes is not None:
             scsm.set_routes(options.routes.split(","))
 
+        scsm.create_schedule()
         scsm.process_schedule()
 
-        if options.verbose:
-            scsm.print_disposition_result()
-
-        scsm.write_disposition_result(options.output_filename)
+        scsm.show_disposition_result()
 
     except FileReadError as e:
         _error(f"input file {e.filename} may not be present or readable")
 
     except DatabaseEmptyError as e:
         _error(f"input file {e.filename} does not contain any records")
-
-    except FileWriteError as e:
-        _error(f"output file {e.filename} may be opened in another application or not writable")
 
     except DataProcessingError as e:
         _error(str(e))
