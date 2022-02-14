@@ -1,51 +1,65 @@
-# SCSM - Statistics based Crew Scheduling Model
+# Einführung
 
-This project called SCSM is a statistics based model providing advices for schedule optimization of ticket inspector or security crews in public transport.
+Mit der Marktöffnung im ÖV-Sektor stehen Verkehrsunternehmen vielfach unter hohem Kostendruck. Besonders in eigenwirtschaftlich betriebenen Netzen ist die Einnahmeabsicherung ein wichtiges Instrument um die wirtschaftliche Stabilität des Verkehrsunternehmens sicherzustellen. Durch den vielfach praktizierten kontrollierten Vordereinstieg bei Bussen ist dies in der Regel nicht vollumfänglich zu leisten. Zusätzliches, besonders geschultes Kontrollpersonal führt allerdings zu Mehrkosten von nicht unerheblichem Umfang. Dem gegenüber stehen sowohl die Einnahmen aus dem verhängten erhöhten Beförderungsentgelt (EBE) und die Mehreinnahmen aus einem nachweislichen Rückgang der Fahrgeldhinterziehungsquote durch den Einsatz von gesondertem Kontrollpersonal. Ziel sollte es also sein, das Gesamtverlustsaldo aus der Fahrgeldhinterziehung so gering wie möglich zu halten.
 
-SCSM uses data about certain public transport routes, the amount of passengers controlled and number of complained passengers. All of these data are collected by the ticket inspectors normally. A second file with planned schedules and duties is in advance used in advance to distribute activities over all times and transport routes as well as possible.
+In diesem Projekt wurde ein statistisches Modell zur optimierten Einteilung des Kontrollpersonals entwickelt. Dabei steht die Maximierung der EBE-Einnahmen und die gleichmäßige Verteilung der Kontrollen über alle Linien hinweg im Zentrum. Das Modell unter der Bezeichnung SCSM (für Statistics based Crew Scheduling Model) analysiert hierzu Daten aus den bisher geleisteten Fahrscheinkontrollen und ordnet jeder Dienststunde eine zu kontrollierende Linie zu. Das Projekt entstand im Rahmen des Master-Studiums Verkehrssystemmanagement am [Institut für ubiquitäre Mobilitätssysteme](https://www.h-ka.de/iums/profil) der [Hochschule Karlsruhe](https://www.h-ka.de).
 
-## Running the Sample Script
+## Arbeitsweise
 
-A sample implementation using SCSM can be found in the file ```run.py```. The file is also able to run a simple demo using example data provided in ```./inputs``` directory. To run SCSM using this repo, you need at least
+SCSM verarbeitet eine Liste mit vorab geplanten Dienstzeiten. Zu jeder geplanten Stunde werden die Prioritäten der einzelnen Linien ermittelt und dann die Linien mit der höchsten Priorität verplant.
 
-* a SQLite database containing report data from previous duties
-* a file describing planned crew schedules with at least one planned duty in future
+Die Priorität einer Linie hängt hauptsächlich von der Beanstandungsquote der Linie ab. An zweiter Stelle steht die gleichmäßige Verteilung der Kontrollen über alle Linien. Dadurch ist sichergestellt, dass Linien mit erfahrungsgemäß höherer Beanstandungsquote häufiger kontrolliert und andere Linien im Gegenzug auch nicht vernachlässigt werden. Essenziell für die Beurteilung der Stichprobenqualität ist eine aussagekräftige Stichprobe an kontrollierten Fahrgästen. Linien werden in Zeitfenster, in denen nach aktuellem Datenstand weniger als 50 Fahrgäste kontrolliert wurden, also generell höher priorisiert, um einen validen Stichprobenumfang sicherzustellen. Weitere Informationen zur exakten Priorisierung von Linien sind in der offiziellen Ausarbeitung [Paper_IUMS_2022.pdf](/Paper_IUMS_2022.pdf) zu finden.
 
-To run he SCSM script, you only need to call
+## Beispielskript
+
+Eine Beispielimplementierung, welche SCSM einsetzt, ist im Skript ```run.py``` zu finden. Um dieses Skript zu starten, wird nur 
+
+* ein Beispieldatensatz als SQLite-Datenbank
+* eine Datei mit geplanten Dienstzeiten mit mindestens einem geplanten Dienst
+
+benötigt. Eine geeignete Beispieldatenbank im Repository enthalten.
+
+Das Beispielskript kann mit Hilfe des Befehls
 
 ```
-python run.py -d ./input/example_report_data.db3 -s ./input/example_schedule_data.txt -o ./output/example_schedule.xlsx
+python run.py -d ./input/example_report_data.db3 -s ./input/example_schedule_data.txt
 ```
-in the execution shell. Call ```python run.py -h``` for help and see the next paragraph for format specifications of the input files.
 
-## Exclude / Include Routes
+gestartet werden. Zum Ende der Ausführung wird das Ergebnis der Dienstplanung in einem Fenster angezeigt.
 
-If you wish to exclude or include certain routes, you can specify the option
+Mit Hilfe des Befehls ```python run.py -h``` werden Hinweise zum Aufruf des Beispielskriptes angezeigt.
+
+## Linienauswahl
+
+Wenn nur bestimmte Linien bei der Berechnung berücksichtigt werden sollen, kann die Option
 
 ```
 -r 15,17,18,20,21
 ```
 
-with the routes which should be included separated by a comma. Routes not included in this list will not be observed.
+an den Aufruf angehängt werden. Die zu berücksichtigenden Linien sind durch Kommata getrennt anzugeben. Linien, die in dieser Liste dann nicht enthalten sind, werden im Rahmen der Dienstplanung dann auch nicht berücksichtigt.
 
+## Eingangsdatenformat
 
-## Input Data Formats
+Die SQLite-Datenbank mit den Eingangsdaten muss mindestens eine Tabelle mit der Bezeichnung ```report``` enthalten. Jede Zeile der Tabelle repräsentiert eine zurückgelegte Fahrt des Kontrollpersonals und muss die Spalten
 
-The report SQLite database must contain a table named ```report``` with at least the columns
+* date: Datum im Format yyyyMMdd
+* route_name: Eindeutige Linienbezeichnung
+* departure_time: Abfahrtszeit der Fahrt im Format HH:mm:ss
+* arrival_time: Ankunftszeit der Fahrt im Format HH:mm:ss
+* num_passengers: Anzahl kontrollierter Fahrgäste während dieser Fahrt
+* num_complaints: Anzahl Beanstandungen während dieser Fahrt
 
-* date: date in format yyyyMMdd
-* route_name: an unique route name
-* departure_time: time of trip start in format HH:mm:ss
-* arrival_time: time of trip end in format HH:mm:ss
-* num_passengers: number of passengers controlled during this trip
-* num_complaints: number of complaints during this trip
+enthalten.
 
-The planned schedules input file must contain at least the following columns:
+Die Datei mit den geplanten Diensten muss mindestens die Spalten
 
-* date: date of the schedule in format yyyyMMdd
-* start_hour: start hour for first trip (includes every trip starting from hh:01)
-* end_hour: end hour for last trip must be leaved before (includes every trip starting until hh:59 _in the hour before_!)
+* date: Datum des Dienstes im Format yyyyMMdd
+* start_hour: Stunde des Dienstbeginns (erster Fahrtbeginn ab hh:01)
+* end_hour: Stunde des Dienstendes (letzter Fahrtbeginn bis hh:59 _in der vorhergehenden Stunde_!)
 
-A hour must be planned only once per date.
+enthalten. Jede Stunde darf an einem Tag nur einmal verplant sein. Als Trennzeichen muss ein Semikolon verwendet werden.
 
-Both files must be RFC-4158 compliant CSV files using *one header row*, *```\n``` or ```\r\n```* as new line indicator and be separated by a *semicolon*.
+## Lizenz
+
+Dieses Projekt ist lizenziert unter der Apache 2.0 Lizenz. Weitere Informationen unter [LICENSE](/LICENSE.md).
